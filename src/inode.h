@@ -79,6 +79,8 @@ struct nova_inode_info_header {
 	struct rb_root rb_tree;		/* RB tree for directory */
 	struct rb_root vma_tree;	/* Write vmas */
 	struct list_head list;		/* SB list of mmap sih */
+	struct list_head LRU_list_head; /*inode write entry head*/
+	struct list_head indoe_list;
 	int num_vmas;
 	unsigned short i_mode;		/* Dir or file? */
 	unsigned int i_flags;
