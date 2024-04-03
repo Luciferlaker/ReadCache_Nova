@@ -1033,7 +1033,7 @@ u64 nova_new_nova_inode(struct super_block *sb, u64 *pi_addr)
 	mutex_lock(&inode_map->inode_table_mutex);
 	ret = nova_alloc_unused_inode(sb, map_id, &free_ino);
 	if (ret) {
-		nova_dbg("%s: alloc inode number failed %d\n", __func__, ret);
+		nova_dbg("%s: alloc inode number failyyed %d\n", __func__, ret);
 		mutex_unlock(&inode_map->inode_table_mutex);
 		return 0;
 	}
@@ -1157,6 +1157,9 @@ struct inode *nova_new_vfs_inode(enum nova_new_inode_type type,
 	si = NOVA_I(inode);
 	sih = &si->header;
 	nova_init_header(sb, sih, inode->i_mode);
+	printk("sih->LRU_list_head=%ld   all_inode_LRU_list=%ld",&sih->LRU_list_head,&all_inode_LRU_list);
+	list_add_tail(&sih->indoe_list,&all_inode_LRU_list);
+	printk("add all inode lru list\n");
 	sih->pi_addr = pi_addr;
 	sih->alter_pi_addr = alter_pi_addr;
 	sih->ino = ino;

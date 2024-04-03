@@ -87,6 +87,7 @@ struct nova_super_block {
 #define NOVA_NORMAL_INODE_START      (32)
 
 
+extern struct list_head all_inode_LRU_list;
 
 /*
  * NOVA super-block data in DRAM
@@ -215,4 +216,13 @@ extern void nova_update_super_crc(struct super_block *sb);
 extern void nova_sync_super(struct super_block *sb);
 
 struct snapshot_info *nova_alloc_snapshot_info(struct super_block *sb);
+
+extern u64 age;
+
+#define BUFFER_SIZE 100
+struct mirgation_data{
+	struct inode *inode;
+	struct nova_file_write_entry* entry;
+};
+
 #endif

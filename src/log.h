@@ -69,6 +69,11 @@ static inline void nova_set_entry_type(void *p, enum nova_entry_type type)
  *
  * Documentation/filesystems/nova.txt contains descriptions of some fields.
  */
+
+#define DRAM 2
+#define Wait 1
+#define PM 	 0
+
 struct nova_file_write_entry {
 	u8	entry_type;
 	u8	reassigned;	/* Data is not latest */
@@ -85,12 +90,13 @@ struct nova_file_write_entry {
 	__le64	trans_id;
 	__le32	csumpadding;
 	__le32	csum;
-	u8	flag;		/*Data is being DRAM*/
-	u8  vaild;
-	u8  vaild1;
-	u8  vaild2;
-	__le32  counter ; /*Data read time counter*/
-	void * DRAM_address;   /*the address of the file in DRAM*/
+	struct list_head entry_list;		/* write_enrty_LRU_list */
+	__le32  counter;					/*entry access time*/
+	__le64  age;						/*access time*/
+	__le32  flag;						/*three status on DRAM ,waiting,on PM */
+	void *	dram_address;				/*the address in DRAM*/
+	void *	pm_address;					/*the address in PM*/
+	struct inode* inode;
 } __attribute((__packed__));
 
 #define WENTRY(entry)	((struct nova_file_write_entry *) entry)
@@ -235,6 +241,9 @@ struct nova_log_entry_info {
 	u32 time;
 	int link_change;
 	int inplace;	/* For file write entry */
+	u32 counter;	/* for read/write entry*/
+	u64 age;		/*for read/write entry*/
+	spinlock_t spin_lock; /*spin lock for change entry*/
 };
 
 

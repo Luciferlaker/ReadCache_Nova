@@ -1395,6 +1395,9 @@ int nova_snapshot_init(struct super_block *sb)
 
 	sih = &sbi->snapshot_si->header;
 	nova_init_header(sb, sih, 0);
+
+	//list_add_tail(&sih->indoe_list,&all_inode_LRU_list);
+	//printk("snap\n");
 	sih->pi_addr = nova_get_reserved_inode_addr(sb, ino);
 	sih->alter_pi_addr = nova_get_alter_reserved_inode_addr(sb, ino);
 	sih->ino = ino;

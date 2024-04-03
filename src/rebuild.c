@@ -725,6 +725,10 @@ int nova_rebuild_inode(struct super_block *sb, struct nova_inode_info *si,
 	// We need this valid in case we need to evict the inode.
 
 	nova_init_header(sb, sih, __le16_to_cpu(pi->i_mode));
+
+	struct nova_sb_info *sbi = NOVA_SB(sb);
+	//list_add_tail(&sih->indoe_list,&all_inode_LRU_list);
+
 	sih->pi_addr = pi_addr;
 
 	if (pi->deleted == 1) {

@@ -43,7 +43,6 @@
 #include "super.h"
 #include "inode.h"
 
-
 int measure_timing;
 int metadata_csum;
 int wprotect;
@@ -51,11 +50,6 @@ int data_csum;
 int data_parity;
 int dram_struct_csum;
 int support_clwb;
-
-
-struct thread_parameter shared_data;
-
-wait_queue_head_t my_wait_queue;
 
 module_param(measure_timing, int, 0444);
 MODULE_PARM_DESC(measure_timing, "Timing measurement");
@@ -83,6 +77,19 @@ static const struct export_operations nova_export_ops;
 static struct kmem_cache *nova_inode_cachep;
 static struct kmem_cache *nova_range_node_cachep;
 static struct kmem_cache *nova_snapshot_info_cachep;
+
+struct list_head all_inode_LRU_list;
+struct list_head DRAM_LRU_list;
+static struct timer_list my_timer;
+u64 age;
+static struct mirgation_data buffer[BUFFER_SIZE];
+static struct task_struct *mirgation_thread;
+DECLARE_WAIT_QUEUE_HEAD(mirgation_queue);
+static int read_index = 0;
+static int write_index = 0;
+
+spinlock_t LRU_spinlock;
+
 
 /* FIXME: should the following variable be one per NOVA instance? */
 unsigned int nova_dbgmask;
@@ -588,28 +595,87 @@ static int nova_check_integrity(struct super_block *sb)
 	return 0;
 }
 
-int thread_function(void *data) {
+void pm2dram(struct nova_file_write_entry * entry,struct inode *inode)
+{
+	struct super_block *sb = inode->i_sb;
+	struct nova_inode_info *si = NOVA_I(inode);
+	struct nova_inode_info_header *sih = &si->header;
+	unsigned long nvmm;
+	void *dax_mem = NULL;
+	void *dram_address = NULL;
+	unsigned long copy_size;
+	pgoff_t index;
+	copy_size = entry -> num_pages*PAGE_SIZE;
+	index = entry -> pgoff;
+	nvmm = get_nvmm(sb,sih,entry,index);
+	dax_mem = nova_get_block(sb, (nvmm << PAGE_SHIFT));
+	dram_address = kmalloc(copy_size,GFP_KERNEL);
+	memcpy(dram_address,dax_mem,copy_size);	
+	entry -> flag = DRAM;
+	entry -> dram_address = dram_address;
+}
+
+
+static int mirgation(void *arg) {
     while (!kthread_should_stop()) {
-        // Wait for the condition to become true
-        wait_event_interruptible(my_wait_queue, shared_data.thread_conditions != 0);
+        // 消费数据
+        wait_event_interruptible(mirgation_queue, read_index != write_index);
 
-        if (shared_data.thread_conditions) {
-            printk(KERN_INFO "Event occurred, running task...\n");
-			void* dram_memory = NULL;
-			//mutex_lock(&shared_data.lock);
-			void* dax_mem=shared_data.dax_mem;
-			dram_memory= (unsigned long)kmalloc(PAGE_SIZE,GFP_KERNEL);
-			memcpy(dram_memory,dax_mem,PAGE_SIZE);
-			shared_data.entry->DRAM_address=dram_memory;
-			shared_data.entry->flag=1;
-            shared_data.thread_conditions = 0;
-			//mutex_unlock(&shared_data.lock);
-
-        }
+        struct mirgation_data* item = &buffer[read_index];
+		pm2dram(item->entry,item->entry->inode);
+		list_move(&item->entry->entry_list,&DRAM_LRU_list);
+        printk(KERN_INFO "Consumer from position %d\n", read_index);
+        read_index = (read_index + 1) % BUFFER_SIZE;
     }
 
     return 0;
 }
+
+
+// 扫描链表
+void scan_list(void) {
+
+	struct nova_inode_info_header* entry;
+	int i=0;
+    list_for_each_entry(entry, &all_inode_LRU_list,indoe_list) {
+		printk("LRU_list %d   lru_list_head=%ld  \n",i,&entry->indoe_list);
+		int j=0;
+		struct nova_file_write_entry* write_entry;
+        list_for_each_entry(write_entry, &entry->LRU_list_head, entry_list) {
+
+			//hot page
+			if(write_entry->counter >= 2*write_entry->num_pages)
+			{
+				buffer[write_index].entry = write_entry;
+				write_index = (read_index + 1) % BUFFER_SIZE;
+			}
+		
+			//printk("write_entry_num_page%d = %ld      lru_list_head=%ld   write_entry_counter = %d  write_entry_age = %d\n",j,write_entry->num_pages,&write_entry->entry_list,write_entry->counter,write_entry->age);
+			j++;
+    	}
+		i++;
+    }
+
+	int j=0;
+	struct nova_file_write_entry* DRAM_write_entry;
+	list_for_each_entry(DRAM_write_entry, &DRAM_LRU_list, entry_list)
+	{
+		printk("DRAM_write_entry_num_page%d = %ld      lru_list_head=%ld   write_entry_counter = %d  write_entry_age = %d\n",j,DRAM_write_entry->num_pages,&DRAM_write_entry->entry_list,DRAM_write_entry->counter,DRAM_write_entry->age);
+		j++;
+	}
+
+	wake_up_interruptible(&mirgation_queue); // 唤醒等待的线程
+}
+
+
+// 定时器回调函数
+void timer_callback(struct timer_list *t) {
+    printk(KERN_INFO "Scanning list...\n");
+    scan_list();
+	age++;
+    mod_timer(t, jiffies + msecs_to_jiffies(5000));  // 设置下一次定时器触发时间
+}
+
 
 
 static int nova_fill_super(struct super_block *sb, void *data, int silent)
@@ -637,12 +703,6 @@ static int nova_fill_super(struct super_block *sb, void *data, int silent)
 
 	BUILD_BUG_ON(sizeof(struct nova_inode_page_tail) +
 		     LOG_BLOCK_TAIL != PAGE_SIZE);
-
-	
-	init_waitqueue_head(&my_wait_queue); // 初始化等待队列
-	mutex_init(&shared_data.lock);
-	kthread_run(thread_function, NULL, "event_thread");
-  
 
 	sbi = kzalloc(sizeof(struct nova_sb_info), GFP_KERNEL);
 	if (!sbi)
@@ -689,6 +749,17 @@ static int nova_fill_super(struct super_block *sb, void *data, int silent)
 
 	mutex_init(&sbi->vma_mutex);
 	INIT_LIST_HEAD(&sbi->mmap_sih_list);
+
+	
+	INIT_LIST_HEAD(&all_inode_LRU_list);
+
+	INIT_LIST_HEAD(&DRAM_LRU_list);
+	
+	DECLARE_WAIT_QUEUE_HEAD(consumer_queue);	
+
+	kthread_run(mirgation, NULL, "MIRGATION");
+
+	spin_lock_init(&LRU_spinlock);
 
 	sbi->inode_maps = kcalloc(sbi->cpus, sizeof(struct inode_map),
 					GFP_KERNEL);
@@ -844,6 +915,14 @@ setup_sb:
 
 	retval = 0;
 	NOVA_END_TIMING(mount_t, mount_time);
+
+	printk(KERN_INFO "Initializing module...\n");
+
+    // 初始化定时器
+    timer_setup(&my_timer, timer_callback, 0);
+    my_timer.expires = jiffies + msecs_to_jiffies(5000);  // 设置定时器触发时间
+    add_timer(&my_timer);
+
 	return retval;
 
 out:
@@ -1287,6 +1366,7 @@ out1:
 
 static void __exit exit_nova_fs(void)
 {
+	del_timer(&my_timer);
 	unregister_filesystem(&nova_fs_type);
 	remove_proc_entry(proc_dirname, NULL);
 	destroy_snapshot_info_cache();

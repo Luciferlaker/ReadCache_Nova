@@ -433,7 +433,7 @@ ssize_t nova_seq_gc(struct file *filp, const char __user *buf,
 	_buf = kmalloc(len, GFP_KERNEL);
 	if (_buf == NULL)  {
 		retval = -ENOMEM;
-		nova_dbg("%s:  failed\n", __func__);
+		nova_dbg("%s: kmalloc failed\n", __func__);
 		goto out;
 	}
 

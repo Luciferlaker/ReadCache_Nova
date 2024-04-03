@@ -285,6 +285,8 @@ static int nova_update_write_entry(struct super_block *sb,
 	entry->mtime = cpu_to_le32(entry_info->time);
 	entry->size = cpu_to_le64(entry_info->file_size);
 	entry->updating = 0;
+	entry->counter = cpu_to_le32(entry_info->counter);
+	entry->age = cpu_to_le64(entry_info->age);
 	nova_update_entry_csum(entry);
 	return 0;
 }
@@ -842,7 +844,6 @@ int nova_assign_write_entry(struct super_block *sb,
 
 			radix_tree_replace_slot(&sih->tree, pentry, entry);
 		} else {
-			printk("radix_tree_insert curr_pgoff =%ld\n",curr_pgoff);
 			ret = radix_tree_insert(&sih->tree, curr_pgoff, entry);
 			if (ret) {
 				nova_dbg("%s: ERROR %d\n", __func__, ret);

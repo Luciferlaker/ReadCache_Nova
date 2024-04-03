@@ -166,6 +166,10 @@ int nova_reassign_file_tree(struct super_block *sb,
 
 		addr = (void *) nova_get_block(sb, curr_p);
 		entry = (struct nova_file_write_entry *) addr;
+		
+		//printk("dax LRU_list_head=%ld entry_list=%ld\n",&sih->LRU_list_head,&entry->entry_list);
+		list_add_tail(&entry->entry_list,&sih->LRU_list_head);
+		//("LRU_list_head ok\n");
 
 		if (metadata_csum == 0)
 			entryc = entry;
@@ -242,11 +246,11 @@ int nova_cleanup_incomplete_write(struct super_block *sb,
 
 	return 0;
 }
-
+/*add age counter flag*/
 void nova_init_file_write_entry(struct super_block *sb,
 	struct nova_inode_info_header *sih, struct nova_file_write_entry *entry,
 	u64 epoch_id, u64 pgoff, int num_pages, u64 blocknr, u32 time,
-	u64 file_size)
+	u64 file_size,struct inode* inode)
 {
 	memset(entry, 0, sizeof(struct nova_file_write_entry));
 	entry->entry_type = FILE_WRITE;
@@ -262,9 +266,14 @@ void nova_init_file_write_entry(struct super_block *sb,
 	entry->mtime = cpu_to_le32(time);
 
 	entry->size = file_size;
-	/*entry->counter=0;
-	entry->flag=0;
-	entry->DRAM_address=NULL;*/
+
+	entry->age = age;
+	entry->counter = 0;
+	entry->flag = PM;
+	entry->dram_address = NULL;
+	entry->pm_address = NULL;
+	entry->inode = inode;
+	
 }
 
 int nova_protect_file_data(struct super_block *sb, struct inode *inode,
@@ -723,8 +732,7 @@ ssize_t do_nova_inplace_file_write(struct file *filp,
 		if (hole_fill) {
 			nova_init_file_write_entry(sb, sih, &entry_data,
 						epoch_id, start_blk, allocated,
-						blocknr, time, file_size);
-
+						blocknr, time, file_size,inode);
 			ret = nova_append_file_write_entry(sb, pi, inode,
 						&entry_data, &update);
 			if (ret) {
@@ -743,9 +751,12 @@ ssize_t do_nova_inplace_file_write(struct file *filp,
 			entry_info.time = time;
 			entry_info.file_size = file_size;
 			entry_info.inplace = 1;
+			entry_info.counter = 0;
+			entry_info.age = age;
 
 			nova_inplace_update_write_entry(sb, inode, entry,
 							&entry_info);
+//			list_move(&entry->entry_list,&sih->LRU_list_head);
 		}
 
 		nova_dbgv("Write: %p, %lu\n", kmem, copied);
@@ -965,8 +976,7 @@ again:
 	/* Do not extend file size */
 	nova_init_file_write_entry(sb, sih, &entry_data,
 					epoch_id, iblock, num_blocks,
-					blocknr, time, inode->i_size);
-
+					blocknr, time, inode->i_size,inode);
 	ret = nova_append_file_write_entry(sb, pi, inode,
 				&entry_data, &update);
 	if (ret) {

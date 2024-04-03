@@ -61,8 +61,10 @@ int nova_block_symlink(struct super_block *sb, struct nova_inode *pi,
 	/* Apply a write entry to the log page */
 	time = current_time(inode).tv_sec;
 	nova_init_file_write_entry(sb, sih, &entry_data, epoch_id, 0, 1,
-					name_blocknr, time, len + 1);
+					name_blocknr, time, len + 1,inode);
 
+	list_add_tail(&entry_data.entry_list,&sih->LRU_list_head);
+	printk("nova_block_symlink\n");
 	ret = nova_append_file_write_entry(sb, pi, inode, &entry_data, &update);
 	if (ret) {
 		nova_dbg("%s: append file write entry failed %d\n",

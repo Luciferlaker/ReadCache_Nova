@@ -391,8 +391,7 @@ int nova_mmap_to_new_blocks(struct vm_area_struct *vma,
 
 		nova_init_file_write_entry(sb, sih, &entry_data,
 					epoch_id, entry_pgoff, copy_blocks,
-					blocknr, time, entry_size);
-
+					blocknr, time, entry_size,inode);
 		ret = nova_append_file_write_entry(sb, pi, inode,
 					&entry_data, &update);
 		if (ret) {

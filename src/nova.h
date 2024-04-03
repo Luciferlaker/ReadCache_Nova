@@ -47,12 +47,6 @@
 #include <linux/pfn_t.h>
 #include <linux/pagevec.h>
 
-#include <linux/kthread.h>
-#include <linux/module.h>
-#include <linux/wait.h>       // For wait queues
-#include <linux/sched.h>      // For TASK_INTERRUPTIBLE
-
-
 #include "nova_def.h"
 #include "stats.h"
 #include "snapshot.h"
@@ -322,8 +316,7 @@ static inline void memset_nt(void *dest, uint32_t dword, size_t length)
  */
 static inline void *nova_get_block(struct super_block *sb, u64 block)
 {
-	struct nova_super_block *ps = nova_get_super(sb);
-
+	struct nova_super_block *ps = nova_get_super(sb);	
 	return block ? ((void *)ps + block) : NULL;
 }
 
@@ -979,7 +972,7 @@ int nova_cleanup_incomplete_write(struct super_block *sb,
 void nova_init_file_write_entry(struct super_block *sb,
 	struct nova_inode_info_header *sih, struct nova_file_write_entry *entry,
 	u64 epoch_id, u64 pgoff, int num_pages, u64 blocknr, u32 time,
-	u64 size);
+	u64 size,struct inode*inode);
 int nova_reassign_file_tree(struct super_block *sb,
 	struct nova_inode_info_header *sih, u64 begin_tail);
 unsigned long nova_check_existing_entry(struct super_block *sb,
@@ -1152,21 +1145,5 @@ void nova_print_free_lists(struct super_block *sb);
 /* perf.c */
 int nova_test_perf(struct super_block *sb, unsigned int func_id,
 	unsigned int poolmb, size_t size, unsigned int disks);
-
-
-/*thread*/
-
-struct thread_parameter
-{
-	struct nova_file_write_entry *entry;
-	void* dax_mem;
-	int thread_conditions;
-	struct mutex lock; // Mutex for synchronization
-};
-
-extern wait_queue_head_t my_wait_queue; 
-
-int thread_function(void *data); 
-
 
 #endif /* __NOVA_H */

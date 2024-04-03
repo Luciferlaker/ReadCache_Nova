@@ -23,7 +23,6 @@
 #include "nova.h"
 #include "inode.h"
 
-extern struct thread_parameter shared_data;
 
 static inline int nova_can_set_blocksize_hint(struct inode *inode,
 	struct nova_inode *pi, loff_t new_size)
@@ -280,8 +279,7 @@ static long nova_fallocate(struct file *file, int mode, loff_t offset,
 		/* Handle hole fill write */
 		nova_init_file_write_entry(sb, sih, &entry_data, epoch_id,
 					start_blk, allocated, blocknr,
-					time, new_size);
-
+					time, new_size,inode);
 		ret = nova_append_file_write_entry(sb, pi, inode,
 					&entry_data, &update);
 		if (ret) {
@@ -456,6 +454,7 @@ out_unlock:
 	return ret;
 }
 
+
 static ssize_t
 do_dax_mapping_read(struct file *filp, char __user *buf,
 	size_t len, loff_t *ppos)
@@ -511,10 +510,12 @@ do_dax_mapping_read(struct file *filp, char __user *buf,
 			if (nr <= offset)
 				goto out;
 		}
-		entry = nova_get_write_entry(sb, sih, index);
-		printk("entry_count is :%d\n",entry->counter);
-		printk("entry_flag is :%d\n",entry->flag);
 
+		entry = nova_get_write_entry(sb, sih, index);
+		/*list operation*/
+		entry->counter++;
+		entry->age = age;                                                              
+		//list_move(&entry->entry_list,&sih->LRU_list_head);
 		if (unlikely(entry == NULL)) {
 			nova_dbgv("Required extent not found: pgoff %lu, inode size %lld\n",
 				index, isize);
@@ -542,34 +543,18 @@ do_dax_mapping_read(struct file *filp, char __user *buf,
 		} else {
 			nr = PAGE_SIZE;
 		}
-
-		nvmm = get_nvmm(sb, sih, entryc, index);
-		dax_mem = nova_get_block(sb, (nvmm << PAGE_SHIFT));
+		if(entryc->flag == PM)
+		{
+			printk("pm address\n");
+			nvmm = get_nvmm(sb, sih, entryc, index);
+			dax_mem = nova_get_block(sb, (nvmm << PAGE_SHIFT));
+		}
+		if(entryc->flag == DRAM)
+		{
+			printk("adram address\n");
+			dax_mem = entryc->dram_address + PAGE_SIZE*(index - entryc->pgoff);
+		}
 		
-		entry->counter++;
-		if(entry->counter >1 && !entry->flag)
-		{
-			//mutex_lock(&shared_data.lock);
-			shared_data.thread_conditions = 1; // Set the condition to true
-			shared_data.entry=entry;
-			shared_data.dax_mem=dax_mem;
-			//mutex_unlock(&shared_data.lock);
-
- 		    wake_up_interruptible(&my_wait_queue); // Wake up the thread
-
-			/*void* dram_memory = NULL;
-			dram_memory= (unsigned long)kmalloc(PAGE_SIZE,GFP_KERNEL);
-			memcpy(dram_memory,dax_mem,PAGE_SIZE);
-			entry->DRAM_address=dram_memory;
-			entry->flag=1;*/
-		}
-		if(entry->flag)
-		{
-			printk("data is in DRAM\n");
-			dax_mem =entry->DRAM_address;
-			printk("mem_address is =%lu\n",dax_mem);
-		}
-		printk("dax_mem=%lu\n",dax_mem);
 memcpy:
 		nr = nr - offset;
 		if (nr > len - copied)
@@ -604,7 +589,6 @@ skip_verify:
 			error = -EFAULT;
 			goto out;
 		}
-
 		copied += (nr - left);
 		offset += (nr - left);
 		index += offset >> PAGE_SHIFT;
@@ -791,7 +775,7 @@ static ssize_t do_nova_cow_file_write(struct file *filp,
 
 		nova_init_file_write_entry(sb, sih, &entry_data, epoch_id,
 					start_blk, allocated, blocknr, time,
-					file_size);
+					file_size,inode);
 
 		ret = nova_append_file_write_entry(sb, pi, inode,
 					&entry_data, &update);
